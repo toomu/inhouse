@@ -113,3 +113,26 @@ create policy "members remove members" on public.members for delete to authentic
 
 revoke all on public.members from anon;
 grant select, insert, delete on public.members to authenticated;
+
+-- Migration items_added_by: show who added each item.
+alter table public.items add column added_by text;
+
+update public.items i set added_by = lower(u.email) from auth.users u where u.id = i.user_id and i.added_by is null;
+
+-- added_by is the email of whoever (re-)added the item. Clients may pass it to restore an
+-- item on undo, but only a member's email is accepted; anything else becomes the caller.
+create or replace function public.set_item_added_by()
+returns trigger language plpgsql security definer set search_path = ''
+as $$
+begin
+  new.added_by := lower(new.added_by);
+  if new.added_by is null or not exists (select 1 from public.members where email = new.added_by) then
+    new.added_by := lower(auth.jwt() ->> 'email');
+  end if;
+  return new;
+end $$;
+revoke execute on function public.set_item_added_by() from public, anon, authenticated;
+
+create trigger items_set_added_by
+  before insert or update of added_by on public.items
+  for each row execute function public.set_item_added_by();

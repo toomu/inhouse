@@ -117,7 +117,9 @@
   }
   .check:checked { background: var(--accent); border-color: var(--accent); }
   .check:checked::after { content: ""; width: 6px; height: 11px; border: solid var(--accent-ink); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
-  .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .name { overflow-wrap: anywhere; }
+  .by { font-size: 12px; color: var(--muted); }
   .name[contenteditable="true"] { outline: 2px solid var(--accent); border-radius: 4px; padding: 0 4px; }
   li.done .name { text-decoration: line-through; color: var(--muted); }
   .qty-badge {
@@ -327,7 +329,7 @@
   async function load() {
     const [lists, items, history] = await Promise.all([
       db.from('lists').select('id,name,created_at').order('created_at'),
-      db.from('items').select('id,list_id,name,qty,cat,done,created_at').order('created_at', { ascending: false }),
+      db.from('items').select('id,list_id,name,qty,cat,done,created_at,added_by').order('created_at', { ascending: false }),
       db.from('history').select('key,name,cat,count,last')
     ]);
     const err = lists.error || items.error || history.error;
@@ -549,7 +551,10 @@
   const row = i => `
     <li class="${i.done ? 'done' : ''}" data-id="${i.id}">
       <input type="checkbox" class="check" ${i.done ? 'checked' : ''} aria-label="Mark ${esc(i.name)} bought">
-      <span class="name" title="Double-click to rename">${esc(i.name)}</span>
+      <div class="item-text">
+        <span class="name" title="Double-click to rename">${esc(i.name)}</span>
+        <small class="by">Added by ${esc(whoName(i.added_by))} · ${ago(i.created_at)}</small>
+      </div>
       ${i.qty ? `<button class="qty-badge" data-act="qty" title="Change quantity">${esc(i.qty)}</button>` : ''}
       <button class="icon-btn" data-act="edit" title="Edit" aria-label="Edit ${esc(i.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
       <button class="icon-btn del" data-act="del" title="Delete" aria-label="Delete ${esc(i.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
@@ -567,7 +572,18 @@
   }
   $('#toastUndo').onclick = () => { undoFn?.(); undoFn = null; $('#toast').classList.remove('show'); render(); };
 
-  const itemRow = i => ({ id: i.id, list_id: i.list_id, name: i.name, qty: i.qty, cat: i.cat, done: i.done, created_at: i.created_at });
+  const itemRow = i => ({ id: i.id, list_id: i.list_id, name: i.name, qty: i.qty, cat: i.cat, done: i.done, created_at: i.created_at, added_by: i.added_by });
+
+  // "you" for yourself, otherwise the part of the email before the @.
+  const whoName = email => !email ? 'someone' : email === user.email.toLowerCase() ? 'you' : email.split('@')[0];
+  function ago(iso) {
+    const s = (Date.now() - new Date(iso)) / 1000;
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    if (s < 7 * 86400) return `${Math.floor(s / 86400)}d ago`;
+    return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
 
   // ---------- adding ----------
   function addItem(name, qty, cat) {
@@ -576,13 +592,14 @@
     const list = active();
     const existing = list.items.find(i => i.name.toLowerCase() === name.toLowerCase());
     if (existing) {
+      if (existing.done) { existing.added_by = user.email.toLowerCase(); existing.created_at = new Date().toISOString(); }
       existing.done = false;
       if (qty) existing.qty = qty;
       if (cat) existing.cat = cat;
       toast(`“${existing.name}” is already on the list`);
-      sync(db.from('items').update({ done: false, qty: existing.qty, cat: existing.cat }).eq('id', existing.id));
+      sync(db.from('items').update({ done: false, qty: existing.qty, cat: existing.cat, added_by: existing.added_by, created_at: existing.created_at }).eq('id', existing.id));
     } else {
-      const item = { id: uid(), list_id: list.id, name, qty, cat: cat || guessCategory(name), done: false, created_at: new Date().toISOString() };
+      const item = { id: uid(), list_id: list.id, name, qty, cat: cat || guessCategory(name), done: false, created_at: new Date().toISOString(), added_by: user.email.toLowerCase() };
       list.items.unshift(item);
       sync(db.from('items').insert(itemRow(item)));
     }
