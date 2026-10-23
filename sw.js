@@ -1,5 +1,5 @@
 // Network-first so updates show up immediately; falls back to cache when offline.
-const CACHE = 'inhouse-v1';
+const CACHE = 'inhouse-v2';
 const ASSETS = ['./', 'index.html', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', e => {
@@ -13,7 +13,8 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
+  // Only the app shell; Supabase API calls always go straight to the network.
+  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(
     fetch(e.request)
       .then(res => {

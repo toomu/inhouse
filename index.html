@@ -153,10 +153,39 @@
   .toast.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
   .toast button { background: none; border: 0; color: var(--accent); font-weight: 700; padding: 0; }
   @media (prefers-color-scheme: dark) { .toast button { color: #2f7d4f; } }
+
+  [hidden] { display: none !important; }
+  .auth { max-width: 360px; margin: 12vh auto 0; padding: 0 16px; text-align: center; }
+  .auth img { width: 64px; height: 64px; }
+  .auth h1 { margin: 12px 0 4px; font-size: 26px; }
+  .auth p { color: var(--muted); margin: 0 0 24px; }
+  .auth form { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+  .auth input { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface); outline: none; }
+  .auth input:focus { border-color: var(--accent); }
+  .auth .primary { padding: 12px; }
+  .auth .msg { min-height: 20px; font-size: 14px; color: var(--muted); }
+  .auth .msg.err { color: var(--danger); }
+  .linkish { background: none; border: 0; color: var(--accent); padding: 4px; font-size: 14px; }
+  .loading { text-align: center; color: var(--muted); padding: 30vh 16px; }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="loading" id="loading">Loading…</div>
+
+<section class="auth" id="auth" hidden>
+  <img src="icon.svg" alt="">
+  <h1>Inhouse</h1>
+  <p>Your shopping lists, synced across devices.</p>
+  <form id="authForm">
+    <input type="email" id="authEmail" placeholder="Email" autocomplete="email" required>
+    <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password" minlength="6" required>
+    <button class="primary" id="authSubmit">Sign in</button>
+    <div class="msg" id="authMsg"></div>
+  </form>
+  <button class="linkish" id="authToggle">New here? Create an account</button>
+</section>
+
+<div class="wrap" id="app" hidden>
   <header>
     <h1 id="title">Inhouse</h1>
     <button class="icon-btn" id="shareBtn" title="Share / copy list" aria-label="Share list">
@@ -186,7 +215,7 @@
 
   <div class="footer">
     <span id="summary"></span>
-    <span>Saved on this device</span>
+    <span id="syncStatus">Synced</span>
   </div>
 </div>
 
@@ -197,6 +226,11 @@
     <input type="text" id="newListName" placeholder="New list name (e.g. Hardware)" required>
     <button class="primary">Add</button>
   </form>
+  <h3>Account</h3>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:20px">
+    <span id="userEmail" style="flex:1;color:var(--muted);overflow-wrap:anywhere"></span>
+    <button class="ghost" id="signOutBtn">Sign out</button>
+  </div>
   <h3>Data</h3>
   <div class="row">
     <button class="ghost" id="exportBtn">Export backup (.json)</button>
@@ -208,24 +242,27 @@
 
 <div class="toast" id="toast"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.min.js"></script>
 <script>
 (() => {
-  const KEY = 'shopping-list-v1';
+  const SUPABASE_URL = 'https://oonezttazqelfrxzqoop.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_dB3xyYbgjVvvaor4O_bTmQ_-kHlkB0U';
+  const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const LEGACY_KEY = 'shopping-list-v1';   // pre-login localStorage data, migrated on first sign-in
+  const ACTIVE_KEY = 'inhouse-active-list';
   const CATEGORIES = ['Produce', 'Dairy & Eggs', 'Meat & Fish', 'Bakery', 'Pantry', 'Frozen', 'Drinks', 'Snacks', 'Household', 'Personal Care', 'Other'];
-  const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  const uid = () => crypto.randomUUID();
 
-  const defaultState = () => {
-    const id = uid();
-    return { activeList: id, lists: [{ id, name: 'Groceries', items: [] }], history: {} };
+  let user = null;
+  let state = { lists: [], history: {}, activeList: null };
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+    del(k) { try { localStorage.removeItem(k); } catch {} }
   };
-
-  let state;
-  try { state = JSON.parse(localStorage.getItem(KEY)) || defaultState(); }
-  catch { state = defaultState(); }
-  if (!state.lists?.length) state = defaultState();
-  state.history ||= {};
-
-  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+  const cacheKey = () => `inhouse-cache-${user.id}`;
   const $ = s => document.querySelector(s);
   const active = () => state.lists.find(l => l.id === state.activeList) || state.lists[0];
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -251,6 +288,150 @@
     return 'Other';
   };
 
+  // ---------- sync ----------
+  let pending = 0;
+  const setStatus = () => { $('#syncStatus').textContent = pending ? 'Saving…' : navigator.onLine ? 'Synced' : 'Offline'; };
+
+  // Runs a Supabase write; on failure tells the user and reloads the server's truth.
+  async function sync(promise) {
+    pending++; setStatus();
+    try {
+      const { error } = await promise;
+      if (error) throw error;
+    } catch (err) {
+      console.error(err);
+      toast(navigator.onLine ? 'Could not save — refreshing' : 'You are offline — change not saved');
+      load();
+    } finally {
+      pending--; setStatus();
+    }
+  }
+
+  async function load() {
+    const [lists, items, history] = await Promise.all([
+      db.from('lists').select('id,name,created_at').order('created_at'),
+      db.from('items').select('id,list_id,name,qty,cat,done,created_at').order('created_at', { ascending: false }),
+      db.from('history').select('key,name,cat,count,last')
+    ]);
+    const err = lists.error || items.error || history.error;
+    if (err) { console.error(err); setStatus(); return; }
+
+    state.lists = lists.data.map(l => ({ ...l, items: items.data.filter(i => i.list_id === l.id) }));
+    state.history = Object.fromEntries(history.data.map(h => [h.key, h]));
+
+    if (!state.lists.length) return firstRun();
+    if (!state.lists.some(l => l.id === state.activeList)) state.activeList = state.lists[0].id;
+    render();
+  }
+
+  // New account: bring over anything saved before login existed, otherwise start a Groceries list.
+  async function firstRun() {
+    let legacy = null;
+    try { legacy = JSON.parse(store.get(LEGACY_KEY)); } catch {}
+    if (legacy?.lists?.some(l => l.items?.length)) {
+      await importState(legacy);
+      store.del(LEGACY_KEY);
+      toast('Moved your saved list into your account');
+    } else {
+      await db.from('lists').insert({ id: uid(), name: 'Groceries' });
+    }
+    load();
+  }
+
+  async function importState(data) {
+    const lists = [], items = [];
+    for (const l of data.lists) {
+      const id = uid();
+      lists.push({ id, name: String(l.name || 'List').slice(0, 100) });
+      for (const i of l.items || [])
+        if (i.name) items.push({ id: uid(), list_id: id, name: String(i.name).slice(0, 200), qty: String(i.qty || ''), cat: CATEGORIES.includes(i.cat) ? i.cat : 'Other', done: !!i.done });
+    }
+    const history = Object.entries(data.history || {}).map(([key, h]) => ({ key, name: h.name || key, cat: h.cat || null, count: h.count || 1 }));
+    let r = await db.from('lists').insert(lists);
+    if (r.error) throw r.error;
+    if (items.length && (r = await db.from('items').insert(items)).error) throw r.error;
+    if (history.length) await db.from('history').upsert(history, { onConflict: 'user_id,key' });
+    return lists[0]?.id;
+  }
+
+  // Live updates from other devices
+  let channel, reloadTimer;
+  function subscribe() {
+    channel = db.channel('inhouse-' + user.id)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lists' }, scheduleReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'items' }, scheduleReload)
+      .subscribe();
+  }
+  function scheduleReload() {
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(() => {
+      // Don't yank the DOM out from under an in-progress edit.
+      if (pending || document.querySelector('.name[contenteditable="true"]') || document.querySelector('dialog[open]')) return scheduleReload();
+      load();
+    }, 400);
+  }
+  document.addEventListener('visibilitychange', () => { if (user && document.visibilityState === 'visible') scheduleReload(); });
+  addEventListener('online', () => { setStatus(); if (user) load(); });
+  addEventListener('offline', setStatus);
+
+  // ---------- auth ----------
+  let signingUp = false;
+  function showScreen(which) {
+    $('#loading').hidden = which !== 'loading';
+    $('#auth').hidden = which !== 'auth';
+    $('#app').hidden = which !== 'app';
+  }
+  function setAuthMode(up) {
+    signingUp = up;
+    $('#authSubmit').textContent = up ? 'Create account' : 'Sign in';
+    $('#authToggle').textContent = up ? 'Have an account? Sign in' : 'New here? Create an account';
+    $('#authPassword').autocomplete = up ? 'new-password' : 'current-password';
+    authMsg('');
+  }
+  const authMsg = (text, err) => { const m = $('#authMsg'); m.textContent = text; m.className = 'msg' + (err ? ' err' : ''); };
+  $('#authToggle').onclick = () => setAuthMode(!signingUp);
+  $('#authForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = $('#authEmail').value.trim(), password = $('#authPassword').value;
+    $('#authSubmit').disabled = true;
+    authMsg(signingUp ? 'Creating account…' : 'Signing in…');
+    const { data, error } = signingUp
+      ? await db.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } })
+      : await db.auth.signInWithPassword({ email, password });
+    $('#authSubmit').disabled = false;
+    if (error) return authMsg(error.message, true);
+    if (signingUp && !data.session) {
+      setAuthMode(false);
+      authMsg('Check your email to confirm your account, then sign in here.');
+    }
+  });
+  $('#signOutBtn').onclick = async () => { $('#menu').close(); await db.auth.signOut(); };
+
+  let started = false;
+  function onSession(session) {
+    const next = session?.user || null;
+    if (started && next?.id === user?.id) return;
+    started = true;
+    if (channel) { db.removeChannel(channel); channel = null; }
+    user = next;
+    if (!user) {
+      state = { lists: [], history: {}, activeList: null };
+      setAuthMode(false);
+      return showScreen('auth');
+    }
+    $('#userEmail').textContent = user.email;
+    state.activeList = store.get(ACTIVE_KEY);
+    // Paint the last known state instantly, then refresh from the server.
+    try {
+      const cached = JSON.parse(store.get(cacheKey()));
+      if (cached?.lists?.length) { state.lists = cached.lists; state.history = cached.history || {}; render(); }
+    } catch {}
+    showScreen('app');
+    load();
+    subscribe();
+  }
+  db.auth.onAuthStateChange((_event, session) => setTimeout(() => onSession(session)));
+
   // ---------- rendering ----------
   const catSelect = $('#catInput');
   catSelect.innerHTML = '<option value="">Category: auto</option>' + CATEGORIES.map(c => `<option>${c}</option>`).join('');
@@ -264,6 +445,10 @@
 
   function render() {
     const list = active();
+    if (!list) return;
+    state.activeList = list.id;
+    store.set(ACTIVE_KEY, list.id);
+    store.set(cacheKey(), JSON.stringify({ lists: state.lists, history: state.history }));
     document.title = `${list.name} · Inhouse`;
     renderTabs();
 
@@ -279,7 +464,7 @@
       const todo = items.filter(i => !i.done);
       const done = items.filter(i => i.done);
       const groups = {};
-      todo.forEach(i => (groups[i.cat] ||= []).push(i));
+      todo.forEach(i => (groups[CATEGORIES.includes(i.cat) ? i.cat : 'Other'] ||= []).push(i));
       let html = CATEGORIES.filter(c => groups[c]).map(c => group(c, groups[c])).join('');
       if (done.length) html += group(`In cart · ${done.length}`, done);
       main.innerHTML = html;
@@ -289,7 +474,7 @@
     $('#summary').textContent = total ? `${left} to buy · ${total - left} in cart` : '';
     $('#clearDone').disabled = total === left;
     $('#clearDone').style.visibility = total === left ? 'hidden' : 'visible';
-    save();
+    setStatus();
   }
 
   const group = (title, items) => `<section class="group"><h2>${esc(title)}</h2><ul>${items.map(row).join('')}</ul></section>`;
@@ -314,9 +499,11 @@
   }
   $('#toastUndo').onclick = () => { undoFn?.(); undoFn = null; $('#toast').classList.remove('show'); render(); };
 
+  const itemRow = i => ({ id: i.id, list_id: i.list_id, name: i.name, qty: i.qty, cat: i.cat, done: i.done, created_at: i.created_at });
+
   // ---------- adding ----------
   function addItem(name, qty, cat) {
-    name = name.trim();
+    name = name.trim(); qty = qty.trim();
     if (!name) return;
     const list = active();
     const existing = list.items.find(i => i.name.toLowerCase() === name.toLowerCase());
@@ -325,13 +512,17 @@
       if (qty) existing.qty = qty;
       if (cat) existing.cat = cat;
       toast(`“${existing.name}” is already on the list`);
+      sync(db.from('items').update({ done: false, qty: existing.qty, cat: existing.cat }).eq('id', existing.id));
     } else {
-      list.items.unshift({ id: uid(), name, qty: qty.trim(), cat: cat || guessCategory(name), done: false, added: Date.now() });
+      const item = { id: uid(), list_id: list.id, name, qty, cat: cat || guessCategory(name), done: false, created_at: new Date().toISOString() };
+      list.items.unshift(item);
+      sync(db.from('items').insert(itemRow(item)));
     }
     const key = name.toLowerCase();
-    const h = state.history[key] || { name, count: 0 };
-    h.count++; h.cat = cat || h.cat || guessCategory(name); h.last = Date.now();
+    const h = state.history[key] || { key, name, count: 0 };
+    h.count++; h.cat = cat || h.cat || guessCategory(name); h.last = new Date().toISOString();
     state.history[key] = h;
+    sync(db.from('history').upsert({ key, name: h.name, cat: h.cat, count: h.count, last: h.last }, { onConflict: 'user_id,key' }));
     render();
   }
 
@@ -388,11 +579,13 @@
     const li = el.closest('li');
     return li && active().items.find(i => i.id === li.dataset.id);
   };
+  const saveItem = (item, fields) => sync(db.from('items').update(fields).eq('id', item.id));
 
   $('#list').addEventListener('change', e => {
     if (!e.target.classList.contains('check')) return;
     const item = findItem(e.target);
     item.done = e.target.checked;
+    saveItem(item, { done: item.done });
     render();
   });
 
@@ -404,11 +597,15 @@
     if (btn.dataset.act === 'del') {
       const idx = list.items.indexOf(item);
       list.items.splice(idx, 1);
-      toast(`Removed “${item.name}”`, () => list.items.splice(idx, 0, item));
+      sync(db.from('items').delete().eq('id', item.id));
+      toast(`Removed “${item.name}”`, () => {
+        list.items.splice(idx, 0, item);
+        sync(db.from('items').insert(itemRow(item)));
+      });
       render();
     } else if (btn.dataset.act === 'qty') {
       const q = prompt(`Quantity for ${item.name}`, item.qty);
-      if (q !== null) { item.qty = q.trim(); render(); }
+      if (q !== null) { item.qty = q.trim(); saveItem(item, { qty: item.qty }); render(); }
     } else if (btn.dataset.act === 'edit') {
       editItem(item);
     }
@@ -423,10 +620,13 @@
     span.contentEditable = 'true';
     span.focus();
     document.getSelection().selectAllChildren(span);
+    let finished = false;
     const finish = commit => {
+      if (finished) return;
+      finished = true;
       span.contentEditable = 'false';
       const v = span.textContent.trim();
-      if (commit && v) item.name = v;
+      if (commit && v && v !== item.name) { item.name = v.slice(0, 200); saveItem(item, { name: item.name }); }
       render();
     };
     span.onkeydown = ev => {
@@ -442,7 +642,7 @@
     <form method="dialog" id="editForm">
       <h3>Edit item</h3>
       <div class="row">
-        <input type="text" name="name" required aria-label="Name">
+        <input type="text" name="name" required maxlength="200" aria-label="Name">
         <input type="text" name="qty" placeholder="Quantity (e.g. 2, 500g, 1 dozen)" aria-label="Quantity">
         <select name="cat" style="border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--bg)">${CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select>
       </div>
@@ -460,8 +660,12 @@
       item.name = f.name.value.trim() || item.name;
       item.qty = f.qty.value.trim();
       item.cat = f.cat.value;
+      saveItem(item, { name: item.name, qty: item.qty, cat: item.cat });
       const h = state.history[item.name.toLowerCase()];
-      if (h) h.cat = item.cat;
+      if (h) {
+        h.cat = item.cat;
+        sync(db.from('history').update({ cat: h.cat }).eq('key', h.key));
+      }
       render();
     };
     editDlg.showModal();
@@ -472,7 +676,11 @@
     const list = active();
     const removed = list.items.filter(i => i.done);
     list.items = list.items.filter(i => !i.done);
-    toast(`Cleared ${removed.length} item${removed.length === 1 ? '' : 's'}`, () => list.items.push(...removed));
+    sync(db.from('items').delete().in('id', removed.map(i => i.id)));
+    toast(`Cleared ${removed.length} item${removed.length === 1 ? '' : 's'}`, () => {
+      list.items.push(...removed);
+      sync(db.from('items').insert(removed.map(itemRow)));
+    });
     render();
   };
 
@@ -505,25 +713,31 @@
     const l = state.lists.find(x => x.id === b.closest('[data-id]').dataset.id);
     if (b.dataset.act === 'rename') {
       const n = prompt('Rename list', l.name);
-      if (n?.trim()) l.name = n.trim();
+      if (n?.trim()) {
+        l.name = n.trim().slice(0, 100);
+        sync(db.from('lists').update({ name: l.name }).eq('id', l.id));
+      }
     } else if (confirm(`Delete “${l.name}” and its ${l.items.length} items?`)) {
       state.lists = state.lists.filter(x => x !== l);
       if (state.activeList === l.id) state.activeList = state.lists[0].id;
+      sync(db.from('lists').delete().eq('id', l.id));
     }
-    save(); renderListsAdmin();
+    renderListsAdmin();
   });
   $('#newListForm').addEventListener('submit', e => {
     e.preventDefault();
-    const id = uid();
-    state.lists.push({ id, name: $('#newListName').value.trim(), items: [] });
-    state.activeList = id;
+    const l = { id: uid(), name: $('#newListName').value.trim().slice(0, 100), items: [], created_at: new Date().toISOString() };
+    state.lists.push(l);
+    state.activeList = l.id;
+    sync(db.from('lists').insert({ id: l.id, name: l.name }));
     $('#newListName').value = '';
-    save(); renderListsAdmin();
+    renderListsAdmin();
   });
 
   // ---------- backup ----------
   $('#exportBtn').onclick = () => {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const data = { lists: state.lists.map(l => ({ name: l.name, items: l.items.map(({ name, qty, cat, done }) => ({ name, qty, cat, done })) })), history: state.history };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `inhouse-${new Date().toISOString().slice(0, 10)}.json`;
@@ -533,16 +747,20 @@
   $('#importBtn').onclick = () => $('#importFile').click();
   $('#importFile').onchange = async e => {
     const file = e.target.files[0];
-    if (!file) return;
-    try {
-      const data = JSON.parse(await file.text());
-      if (!Array.isArray(data.lists) || !data.lists.length) throw new Error();
-      if (!confirm('Replace your current lists with this backup?')) return;
-      state = { history: {}, ...data };
-      if (!state.lists.some(l => l.id === state.activeList)) state.activeList = state.lists[0].id;
-      save(); renderListsAdmin(); toast('Backup restored');
-    } catch { alert('That file is not a valid backup.'); }
     e.target.value = '';
+    if (!file) return;
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+      if (!Array.isArray(data.lists) || !data.lists.length) throw new Error();
+    } catch { return alert('That file is not a valid backup.'); }
+    if (!confirm(`Add ${data.lists.length} list${data.lists.length === 1 ? '' : 's'} from this backup to your account?`)) return;
+    try {
+      state.activeList = await importState(data);
+      menu.close();
+      toast('Backup imported');
+      load();
+    } catch (err) { console.error(err); alert('Import failed: ' + err.message); }
   };
 
   // ---------- share ----------
@@ -556,8 +774,6 @@
       else { await navigator.clipboard.writeText(text); toast('List copied to clipboard'); }
     } catch {}
   };
-
-  render();
 
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

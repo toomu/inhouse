@@ -1,6 +1,6 @@
 # Inhouse
 
-A small offline-capable shopping list (groceries, hardware, anything) that runs entirely in the browser and is hosted on GitHub Pages.
+A small shopping list (groceries, hardware, anything) hosted on GitHub Pages, with login and sync via Supabase.
 
 - Multiple lists (Groceries, Hardware, …)
 - Items auto-sorted into aisles/categories, with quantities
@@ -10,4 +10,10 @@ A small offline-capable shopping list (groceries, hardware, anything) that runs 
 - Export/import a JSON backup
 - Installable on your phone (Add to Home Screen) and works offline
 
-Data is stored in your browser's localStorage on each device — nothing is sent to a server.
+- Email + password login; lists sync live across all your devices
+
+## Backend
+
+Data lives in the Supabase project `inhouse` (tables `lists`, `items`, `history`; see `supabase/schema.sql`).
+Row-level security restricts every row to the signed-in user. The key in `index.html` is the public
+publishable key, which is safe to ship in a static site.
