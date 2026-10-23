@@ -1,6 +1,6 @@
 {
-  "name": "Shopping List",
-  "short_name": "Shopping",
+  "name": "Inhouse",
+  "short_name": "Inhouse",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

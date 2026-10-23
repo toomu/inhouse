@@ -1,5 +1,5 @@
 // Network-first so updates show up immediately; falls back to cache when offline.
-const CACHE = 'shopping-list-v1';
+const CACHE = 'inhouse-v1';
 const ASSETS = ['./', 'index.html', 'manifest.json', 'icon.svg'];
 
 self.addEventListener('install', e => {

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Shopping List</title>
+<title>Inhouse</title>
 <meta name="description" content="A simple offline shopping list for groceries and anything else you need to buy.">
 <meta name="theme-color" content="#2f7d4f">
 <link rel="manifest" href="manifest.json">
@@ -158,7 +158,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1 id="title">Shopping List</h1>
+    <h1 id="title">Inhouse</h1>
     <button class="icon-btn" id="shareBtn" title="Share / copy list" aria-label="Share list">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
     </button>
@@ -265,7 +265,7 @@
   function render() {
     const list = active();
     $('#title').textContent = list.name;
-    document.title = list.name;
+    document.title = `${list.name} · Inhouse`;
     renderTabs();
 
     const q = $('#search').value.trim().toLowerCase();
@@ -527,7 +527,7 @@
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `shopping-list-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `inhouse-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(a.href);
   };

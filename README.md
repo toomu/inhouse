@@ -1,4 +1,4 @@
-# Shopping List
+# Inhouse
 
 A small offline-capable shopping list (groceries, hardware, anything) that runs entirely in the browser and is hosted on GitHub Pages.
 
