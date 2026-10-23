@@ -10,10 +10,12 @@ A small shopping list (groceries, hardware, anything) hosted on GitHub Pages, wi
 - Export/import a JSON backup
 - Installable on your phone (Add to Home Screen) and works offline
 
-- Email + password login; lists sync live across all your devices
+- Sign in with a one-time code sent to your email
+- Lists are shared by everyone in the household and sync live
+- Household members are an email allowlist, managed from the ☰ menu (the first account to sign up becomes the first member)
 
 ## Backend
 
 Data lives in the Supabase project `inhouse` (tables `lists`, `items`, `history`; see `supabase/schema.sql`).
-Row-level security restricts every row to the signed-in user. The key in `index.html` is the public
+Row-level security only lets household members (table `members`) read or write anything. The key in `index.html` is the public
 publishable key, which is safe to ship in a static site.

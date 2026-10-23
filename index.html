@@ -175,14 +175,24 @@
 <section class="auth" id="auth" hidden>
   <img src="icon.svg" alt="">
   <h1>Inhouse</h1>
-  <p>Your shopping lists, synced across devices.</p>
+  <p>Your household's shared shopping lists.</p>
   <form id="authForm">
     <input type="email" id="authEmail" placeholder="Email" autocomplete="email" required>
-    <input type="password" id="authPassword" placeholder="Password" autocomplete="current-password" minlength="6" required>
-    <button class="primary" id="authSubmit">Sign in</button>
+    <input id="authCode" placeholder="Code from email" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" maxlength="10" hidden>
+    <button class="primary" id="authSubmit">Email me a code</button>
     <div class="msg" id="authMsg"></div>
   </form>
-  <button class="linkish" id="authToggle">New here? Create an account</button>
+  <div id="codeActions" hidden>
+    <button class="linkish" id="authResend">Resend code</button>
+    <button class="linkish" id="authBack">Use a different email</button>
+  </div>
+</section>
+
+<section class="auth" id="noaccess" hidden>
+  <img src="icon.svg" alt="">
+  <h1>Not invited yet</h1>
+  <p><span id="noAccessEmail"></span> isn't a household member. Ask someone in the household to add this email from the ☰ menu, then sign in again.</p>
+  <button class="ghost" id="noAccessSignOut">Sign out</button>
 </section>
 
 <div class="wrap" id="app" hidden>
@@ -224,6 +234,13 @@
   <div class="lists" id="listsAdmin"></div>
   <form id="newListForm" style="display:flex;gap:8px;margin-bottom:20px">
     <input type="text" id="newListName" placeholder="New list name (e.g. Hardware)" required>
+    <button class="primary">Add</button>
+  </form>
+  <h3>Household members</h3>
+  <p style="color:var(--muted);font-size:14px;margin:-6px 0 8px">Everyone here sees and edits the same lists.</p>
+  <div class="lists" id="members"></div>
+  <form id="addMemberForm" style="display:flex;gap:8px;margin-bottom:20px">
+    <input type="text" inputmode="email" id="memberEmail" placeholder="Add member by email" pattern="[^@\s]+@[^@\s]+" required>
     <button class="primary">Add</button>
   </form>
   <h3>Account</h3>
@@ -350,7 +367,7 @@
     let r = await db.from('lists').insert(lists);
     if (r.error) throw r.error;
     if (items.length && (r = await db.from('items').insert(items)).error) throw r.error;
-    if (history.length) await db.from('history').upsert(history, { onConflict: 'user_id,key' });
+    if (history.length) await db.from('history').upsert(history, { onConflict: 'key' });
     return lists[0]?.id;
   }
 
@@ -375,36 +392,47 @@
   addEventListener('offline', setStatus);
 
   // ---------- auth ----------
-  let signingUp = false;
+  let codeSent = false;
   function showScreen(which) {
     $('#loading').hidden = which !== 'loading';
     $('#auth').hidden = which !== 'auth';
     $('#app').hidden = which !== 'app';
+    $('#noaccess').hidden = which !== 'noaccess';
   }
-  function setAuthMode(up) {
-    signingUp = up;
-    $('#authSubmit').textContent = up ? 'Create account' : 'Sign in';
-    $('#authToggle').textContent = up ? 'Have an account? Sign in' : 'New here? Create an account';
-    $('#authPassword').autocomplete = up ? 'new-password' : 'current-password';
+  // Two steps: enter email → we email a one-time code → enter code.
+  function setCodeStep(sent) {
+    codeSent = sent;
+    $('#authEmail').readOnly = sent;
+    $('#authCode').hidden = !sent;
+    $('#authCode').required = sent;
+    $('#authCode').value = '';
+    $('#codeActions').hidden = !sent;
+    $('#authSubmit').textContent = sent ? 'Sign in' : 'Email me a code';
     authMsg('');
+    (sent ? $('#authCode') : $('#authEmail')).focus();
   }
   const authMsg = (text, err) => { const m = $('#authMsg'); m.textContent = text; m.className = 'msg' + (err ? ' err' : ''); };
-  $('#authToggle').onclick = () => setAuthMode(!signingUp);
-  $('#authForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    const email = $('#authEmail').value.trim(), password = $('#authPassword').value;
+  async function sendCode() {
+    const email = $('#authEmail').value.trim();
     $('#authSubmit').disabled = true;
-    authMsg(signingUp ? 'Creating account…' : 'Signing in…');
-    const { data, error } = signingUp
-      ? await db.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } })
-      : await db.auth.signInWithPassword({ email, password });
+    authMsg('Sending code…');
+    const { error } = await db.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } });
     $('#authSubmit').disabled = false;
     if (error) return authMsg(error.message, true);
-    if (signingUp && !data.session) {
-      setAuthMode(false);
-      authMsg('Check your email to confirm your account, then sign in here.');
-    }
+    setCodeStep(true);
+    authMsg(`We emailed a code to ${email}. It may take a minute to arrive.`);
+  }
+  $('#authForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!codeSent) return sendCode();
+    $('#authSubmit').disabled = true;
+    authMsg('Checking code…');
+    const { error } = await db.auth.verifyOtp({ email: $('#authEmail').value.trim(), token: $('#authCode').value.trim(), type: 'email' });
+    $('#authSubmit').disabled = false;
+    if (error) authMsg(/expired|invalid/i.test(error.message) ? 'That code is wrong or has expired. Try again or resend.' : error.message, true);
   });
+  $('#authResend').onclick = sendCode;
+  $('#authBack').onclick = () => setCodeStep(false);
   $('#signOutBtn').onclick = async () => { $('#menu').close(); await db.auth.signOut(); };
 
   let started = false;
@@ -416,8 +444,8 @@
     user = next;
     if (!user) {
       state = { lists: [], history: {}, activeList: null };
-      setAuthMode(false);
-      return showScreen('auth');
+      showScreen('auth');
+      return setCodeStep(false);
     }
     $('#userEmail').textContent = user.email;
     state.activeList = store.get(ACTIVE_KEY);
@@ -427,9 +455,49 @@
       if (cached?.lists?.length) { state.lists = cached.lists; state.history = cached.history || {}; render(); }
     } catch {}
     showScreen('app');
+    checkAccess(user);
+  }
+
+  async function checkAccess(who) {
+    const { data: ok, error } = await db.rpc('is_member');
+    if (who !== user) return;
+    if (!error && !ok) {
+      store.del(cacheKey());
+      $('#noAccessEmail').textContent = user.email;
+      return showScreen('noaccess');
+    }
     load();
     subscribe();
   }
+  $('#noAccessSignOut').onclick = () => db.auth.signOut();
+
+  // ---------- household members ----------
+  async function renderMembers() {
+    const { data, error } = await db.from('members').select('email').order('created_at');
+    if (error) return;
+    $('#members').innerHTML = data.map(m => `
+      <div data-email="${esc(m.email)}">
+        <span>${esc(m.email)}${m.email === user.email.toLowerCase() ? ' <small style="color:var(--muted)">(you)</small>' : ''}</span>
+        ${m.email === user.email.toLowerCase() ? '' : '<button class="ghost" data-act="remove-member" style="color:var(--danger)">Remove</button>'}
+      </div>`).join('');
+  }
+  $('#members').addEventListener('click', async e => {
+    const b = e.target.closest('[data-act="remove-member"]');
+    if (!b) return;
+    const email = b.closest('[data-email]').dataset.email;
+    if (!confirm(`Remove ${email}? They will lose access to the lists.`)) return;
+    await sync(db.from('members').delete().eq('email', email));
+    renderMembers();
+  });
+  $('#addMemberForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = $('#memberEmail').value.trim().toLowerCase();
+    const { error } = await db.from('members').insert({ email });
+    if (error) return toast(error.code === '23505' ? `${email} is already a member` : 'Could not add member');
+    $('#memberEmail').value = '';
+    toast(`Added ${email} — they can now sign in with that email`);
+    renderMembers();
+  });
   db.auth.onAuthStateChange((_event, session) => setTimeout(() => onSession(session)));
 
   // ---------- rendering ----------
@@ -522,7 +590,7 @@
     const h = state.history[key] || { key, name, count: 0 };
     h.count++; h.cat = cat || h.cat || guessCategory(name); h.last = new Date().toISOString();
     state.history[key] = h;
-    sync(db.from('history').upsert({ key, name: h.name, cat: h.cat, count: h.count, last: h.last }, { onConflict: 'user_id,key' }));
+    sync(db.from('history').upsert({ key, name: h.name, cat: h.cat, count: h.count, last: h.last }, { onConflict: 'key' }));
     render();
   }
 
@@ -704,7 +772,7 @@
         ${state.lists.length > 1 ? `<button class="ghost" data-act="remove" style="color:var(--danger)">Delete</button>` : ''}
       </div>`).join('');
   }
-  $('#menuBtn').onclick = () => { renderListsAdmin(); menu.showModal(); };
+  $('#menuBtn').onclick = () => { renderListsAdmin(); renderMembers(); menu.showModal(); };
   $('#closeMenu').onclick = () => menu.close();
   menu.addEventListener('close', render);
   $('#listsAdmin').addEventListener('click', e => {
