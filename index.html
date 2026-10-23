@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shopping List</title>
+<meta name="description" content="A simple offline shopping list for groceries and anything else you need to buy.">
+<meta name="theme-color" content="#2f7d4f">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+  :root {
+    --bg: #f6f5f1;
+    --surface: #ffffff;
+    --surface-2: #efeee9;
+    --text: #1d1f1c;
+    --muted: #6b6f68;
+    --border: #e1dfd8;
+    --accent: #2f7d4f;
+    --accent-ink: #ffffff;
+    --danger: #b23a2b;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141614;
+      --surface: #1d201d;
+      --surface-2: #262a26;
+      --text: #ecefe9;
+      --muted: #9aa197;
+      --border: #313630;
+      --accent: #5cbf85;
+      --accent-ink: #0d1a12;
+      --danger: #ef7a6a;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 96px; }
+
+  header { display: flex; align-items: center; gap: 8px; margin: 8px 0 16px; }
+  header h1 { font-size: 22px; margin: 0; flex: 1; letter-spacing: -.01em; }
+  .icon-btn {
+    background: none; border: 0; border-radius: 10px; padding: 8px;
+    color: var(--muted); display: inline-grid; place-items: center;
+  }
+  .icon-btn:hover { background: var(--surface-2); color: var(--text); }
+  .icon-btn svg { width: 20px; height: 20px; }
+
+  .tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 12px; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    flex: none; border: 1px solid var(--border); background: var(--surface);
+    border-radius: 999px; padding: 6px 14px; font-size: 14px; white-space: nowrap;
+  }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .tab .count { opacity: .7; margin-left: 4px; font-variant-numeric: tabular-nums; }
+
+  form.add {
+    display: grid; grid-template-columns: 1fr 64px auto; gap: 8px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 8px; box-shadow: var(--shadow); position: relative;
+  }
+  form.add input, form.add select {
+    border: 0; background: transparent; padding: 8px; min-width: 0; outline: none;
+  }
+  form.add .qty { background: var(--surface-2); border-radius: 8px; text-align: center; }
+  form.add select { grid-column: 1 / 3; background: var(--surface-2); border-radius: 8px; }
+  .primary {
+    background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px;
+    padding: 8px 16px; font-weight: 600;
+  }
+  .suggest {
+    position: absolute; left: 8px; right: 8px; top: 52px; z-index: 5;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.12); overflow: hidden; display: none;
+  }
+  .suggest button {
+    display: block; width: 100%; text-align: left; background: none; border: 0; padding: 10px 12px;
+  }
+  .suggest button:hover, .suggest button.active { background: var(--surface-2); }
+  .suggest small { color: var(--muted); margin-left: 6px; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; margin: 16px 0 8px; }
+  .search {
+    flex: 1; min-width: 0; border: 1px solid var(--border); background: var(--surface);
+    border-radius: 10px; padding: 8px 12px; outline: none;
+  }
+  .search:focus, form.add:focus-within { border-color: var(--accent); }
+  .ghost {
+    background: none; border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px;
+    font-size: 14px; color: var(--muted); white-space: nowrap;
+  }
+  .ghost:hover { color: var(--text); background: var(--surface); }
+
+  .group h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    margin: 20px 4px 6px; font-weight: 600;
+  }
+  ul { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  li { display: flex; align-items: center; gap: 12px; padding: 10px 8px 10px 14px; border-top: 1px solid var(--border); }
+  li:first-child { border-top: 0; }
+  .check {
+    appearance: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border);
+    flex: none; margin: 0; display: grid; place-items: center; cursor: pointer;
+  }
+  .check:checked { background: var(--accent); border-color: var(--accent); }
+  .check:checked::after { content: ""; width: 6px; height: 11px; border: solid var(--accent-ink); border-width: 0 2px 2px 0; transform: translateY(-1px) rotate(45deg); }
+  .name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .name[contenteditable="true"] { outline: 2px solid var(--accent); border-radius: 4px; padding: 0 4px; }
+  li.done .name { text-decoration: line-through; color: var(--muted); }
+  .qty-badge {
+    font-size: 13px; color: var(--muted); background: var(--surface-2); border-radius: 6px;
+    padding: 2px 8px; font-variant-numeric: tabular-nums; border: 0;
+  }
+  li .icon-btn { padding: 6px; opacity: .55; }
+  li:hover .icon-btn { opacity: 1; }
+  li .icon-btn.del:hover { color: var(--danger); }
+
+  .empty { text-align: center; color: var(--muted); padding: 48px 16px; }
+  .empty strong { display: block; color: var(--text); font-size: 18px; margin-bottom: 4px; }
+
+  .footer { display: flex; justify-content: space-between; gap: 8px; margin-top: 20px; color: var(--muted); font-size: 14px; flex-wrap: wrap; align-items: center; }
+
+  dialog {
+    border: 1px solid var(--border); border-radius: 16px; background: var(--surface); color: var(--text);
+    padding: 20px; width: min(420px, calc(100vw - 32px));
+  }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  dialog h3 { margin: 0 0 12px; }
+  dialog .row { display: flex; flex-direction: column; gap: 8px; }
+  dialog .row button { text-align: left; }
+  dialog .lists { margin: 0 0 16px; }
+  dialog .lists div { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  dialog .lists span { flex: 1; }
+  dialog input[type=text] { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; background: var(--bg); width: 100%; }
+  .toast {
+    position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(20px);
+    background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px;
+    display: flex; gap: 12px; align-items: center; opacity: 0; pointer-events: none; transition: .2s;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%); pointer-events: auto; }
+  .toast button { background: none; border: 0; color: var(--accent); font-weight: 700; padding: 0; }
+  @media (prefers-color-scheme: dark) { .toast button { color: #2f7d4f; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="title">Shopping List</h1>
+    <button class="icon-btn" id="shareBtn" title="Share / copy list" aria-label="Share list">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
+    </button>
+    <button class="icon-btn" id="menuBtn" title="Lists & settings" aria-label="Lists and settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+  </header>
+
+  <nav class="tabs" id="tabs" role="tablist"></nav>
+
+  <form class="add" id="addForm" autocomplete="off">
+    <input id="itemInput" placeholder="Add an item…" aria-label="Item name" required>
+    <input id="qtyInput" class="qty" placeholder="Qty" aria-label="Quantity">
+    <button class="primary" type="submit">Add</button>
+    <select id="catInput" aria-label="Category"></select>
+    <div class="suggest" id="suggest"></div>
+  </form>
+
+  <div class="toolbar">
+    <input class="search" id="search" type="search" placeholder="Search this list">
+    <button class="ghost" id="clearDone">Clear checked</button>
+  </div>
+
+  <main id="list"></main>
+
+  <div class="footer">
+    <span id="summary"></span>
+    <span>Saved on this device</span>
+  </div>
+</div>
+
+<dialog id="menu">
+  <h3>Lists</h3>
+  <div class="lists" id="listsAdmin"></div>
+  <form id="newListForm" style="display:flex;gap:8px;margin-bottom:20px">
+    <input type="text" id="newListName" placeholder="New list name (e.g. Hardware)" required>
+    <button class="primary">Add</button>
+  </form>
+  <h3>Data</h3>
+  <div class="row">
+    <button class="ghost" id="exportBtn">Export backup (.json)</button>
+    <button class="ghost" id="importBtn">Import backup</button>
+    <input type="file" id="importFile" accept="application/json" hidden>
+  </div>
+  <div style="text-align:right;margin-top:20px"><button class="primary" id="closeMenu">Done</button></div>
+</dialog>
+
+<div class="toast" id="toast"><span id="toastMsg"></span><button id="toastUndo">Undo</button></div>
+
+<script>
+(() => {
+  const KEY = 'shopping-list-v1';
+  const CATEGORIES = ['Produce', 'Dairy & Eggs', 'Meat & Fish', 'Bakery', 'Pantry', 'Frozen', 'Drinks', 'Snacks', 'Household', 'Personal Care', 'Other'];
+  const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
+  const defaultState = () => {
+    const id = uid();
+    return { activeList: id, lists: [{ id, name: 'Groceries', items: [] }], history: {} };
+  };
+
+  let state;
+  try { state = JSON.parse(localStorage.getItem(KEY)) || defaultState(); }
+  catch { state = defaultState(); }
+  if (!state.lists?.length) state = defaultState();
+  state.history ||= {};
+
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+  const $ = s => document.querySelector(s);
+  const active = () => state.lists.find(l => l.id === state.activeList) || state.lists[0];
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // Category guesses so most items file themselves.
+  const GUESS = {
+    'Produce': 'apple banana orange lemon lime grape berry berries strawberr blueberr avocado tomato potato onion garlic ginger carrot lettuce spinach kale cucumber pepper broccoli cauliflower mushroom zucchini celery cilantro coriander parsley mint basil herb fruit veg mango pear peach plum melon watermelon cabbage corn peas beans chilli chili',
+    'Dairy & Eggs': 'milk egg cheese butter yogurt yoghurt cream curd paneer ghee',
+    'Meat & Fish': 'chicken beef pork lamb mutton fish salmon tuna shrimp prawn bacon sausage turkey ham mince',
+    'Bakery': 'bread bun bagel croissant tortilla wrap pita naan muffin cake roll',
+    'Pantry': 'rice pasta noodle flour sugar salt oil vinegar sauce ketchup mayo mustard spice cereal oat oats lentil dal honey jam peanut nut coffee tea masala atta soy stock broth can canned',
+    'Frozen': 'frozen ice cream pizza',
+    'Drinks': 'juice soda water beer wine coke sparkling',
+    'Snacks': 'chip chips crisps cookie biscuit chocolate candy popcorn cracker',
+    'Household': 'detergent soap dish sponge paper towel tissue toilet trash bag bin foil wrap bulb battery batteries cleaner bleach',
+    'Personal Care': 'shampoo conditioner toothpaste toothbrush deodorant razor lotion floss sunscreen'
+  };
+  const guessCategory = name => {
+    const n = name.toLowerCase();
+    if (state.history[n]?.cat) return state.history[n].cat;
+    for (const [cat, words] of Object.entries(GUESS))
+      if (words.split(' ').some(w => n.includes(w))) return cat;
+    return 'Other';
+  };
+
+  // ---------- rendering ----------
+  const catSelect = $('#catInput');
+  catSelect.innerHTML = '<option value="">Category: auto</option>' + CATEGORIES.map(c => `<option>${c}</option>`).join('');
+
+  function renderTabs() {
+    $('#tabs').innerHTML = state.lists.map(l => {
+      const left = l.items.filter(i => !i.done).length;
+      return `<button class="tab" role="tab" data-id="${l.id}" aria-selected="${l.id === active().id}">${esc(l.name)}<span class="count">${left || ''}</span></button>`;
+    }).join('');
+  }
+
+  function render() {
+    const list = active();
+    $('#title').textContent = list.name;
+    document.title = list.name;
+    renderTabs();
+
+    const q = $('#search').value.trim().toLowerCase();
+    const items = list.items.filter(i => !q || i.name.toLowerCase().includes(q));
+    const main = $('#list');
+
+    if (!list.items.length) {
+      main.innerHTML = `<div class="empty"><strong>Nothing to buy yet</strong>Add your first item above.</div>`;
+    } else if (!items.length) {
+      main.innerHTML = `<div class="empty">No items match “${esc(q)}”.</div>`;
+    } else {
+      const todo = items.filter(i => !i.done);
+      const done = items.filter(i => i.done);
+      const groups = {};
+      todo.forEach(i => (groups[i.cat] ||= []).push(i));
+      let html = CATEGORIES.filter(c => groups[c]).map(c => group(c, groups[c])).join('');
+      if (done.length) html += group(`In cart · ${done.length}`, done);
+      main.innerHTML = html;
+    }
+
+    const total = list.items.length, left = list.items.filter(i => !i.done).length;
+    $('#summary').textContent = total ? `${left} to buy · ${total - left} in cart` : '';
+    $('#clearDone').disabled = total === left;
+    $('#clearDone').style.visibility = total === left ? 'hidden' : 'visible';
+    save();
+  }
+
+  const group = (title, items) => `<section class="group"><h2>${esc(title)}</h2><ul>${items.map(row).join('')}</ul></section>`;
+  const row = i => `
+    <li class="${i.done ? 'done' : ''}" data-id="${i.id}">
+      <input type="checkbox" class="check" ${i.done ? 'checked' : ''} aria-label="Mark ${esc(i.name)} bought">
+      <span class="name" title="Double-click to rename">${esc(i.name)}</span>
+      ${i.qty ? `<button class="qty-badge" data-act="qty" title="Change quantity">${esc(i.qty)}</button>` : ''}
+      <button class="icon-btn" data-act="edit" title="Edit" aria-label="Edit ${esc(i.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+      <button class="icon-btn del" data-act="del" title="Delete" aria-label="Delete ${esc(i.name)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </li>`;
+
+  // ---------- toast with undo ----------
+  let undoFn = null, toastTimer;
+  function toast(msg, undo) {
+    $('#toastMsg').textContent = msg;
+    undoFn = undo || null;
+    $('#toastUndo').style.display = undo ? '' : 'none';
+    $('#toast').classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => $('#toast').classList.remove('show'), 4000);
+  }
+  $('#toastUndo').onclick = () => { undoFn?.(); undoFn = null; $('#toast').classList.remove('show'); render(); };
+
+  // ---------- adding ----------
+  function addItem(name, qty, cat) {
+    name = name.trim();
+    if (!name) return;
+    const list = active();
+    const existing = list.items.find(i => i.name.toLowerCase() === name.toLowerCase());
+    if (existing) {
+      existing.done = false;
+      if (qty) existing.qty = qty;
+      if (cat) existing.cat = cat;
+      toast(`“${existing.name}” is already on the list`);
+    } else {
+      list.items.unshift({ id: uid(), name, qty: qty.trim(), cat: cat || guessCategory(name), done: false, added: Date.now() });
+    }
+    const key = name.toLowerCase();
+    const h = state.history[key] || { name, count: 0 };
+    h.count++; h.cat = cat || h.cat || guessCategory(name); h.last = Date.now();
+    state.history[key] = h;
+    render();
+  }
+
+  $('#addForm').addEventListener('submit', e => {
+    e.preventDefault();
+    addItem($('#itemInput').value, $('#qtyInput').value, catSelect.value);
+    $('#itemInput').value = ''; $('#qtyInput').value = ''; catSelect.value = '';
+    hideSuggest();
+    $('#itemInput').focus();
+  });
+
+  // Suggestions from things you've bought before
+  const sugg = $('#suggest');
+  let suggIdx = -1;
+  function showSuggest() {
+    const q = $('#itemInput').value.trim().toLowerCase();
+    if (!q) return hideSuggest();
+    const onList = new Set(active().items.filter(i => !i.done).map(i => i.name.toLowerCase()));
+    const matches = Object.entries(state.history)
+      .filter(([k]) => k.includes(q) && k !== q && !onList.has(k))
+      .sort((a, b) => b[1].count - a[1].count).slice(0, 5);
+    if (!matches.length) return hideSuggest();
+    suggIdx = -1;
+    sugg.innerHTML = matches.map(([k, h]) => `<button type="button" data-name="${esc(h.name)}">${esc(h.name)}<small>${esc(h.cat || '')}</small></button>`).join('');
+    sugg.style.display = 'block';
+  }
+  function hideSuggest() { sugg.style.display = 'none'; suggIdx = -1; }
+  $('#itemInput').addEventListener('input', showSuggest);
+  $('#itemInput').addEventListener('blur', () => setTimeout(hideSuggest, 150));
+  $('#itemInput').addEventListener('keydown', e => {
+    const btns = [...sugg.querySelectorAll('button')];
+    if (sugg.style.display !== 'block' || !btns.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      suggIdx = (suggIdx + (e.key === 'ArrowDown' ? 1 : -1) + btns.length) % btns.length;
+      btns.forEach((b, i) => b.classList.toggle('active', i === suggIdx));
+    } else if (e.key === 'Enter' && suggIdx >= 0) {
+      e.preventDefault();
+      $('#itemInput').value = btns[suggIdx].dataset.name;
+      hideSuggest();
+    } else if (e.key === 'Escape') hideSuggest();
+  });
+  sugg.addEventListener('mousedown', e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    e.preventDefault();
+    $('#itemInput').value = b.dataset.name;
+    hideSuggest();
+    $('#qtyInput').focus();
+  });
+
+  // ---------- item actions ----------
+  const findItem = el => {
+    const li = el.closest('li');
+    return li && active().items.find(i => i.id === li.dataset.id);
+  };
+
+  $('#list').addEventListener('change', e => {
+    if (!e.target.classList.contains('check')) return;
+    const item = findItem(e.target);
+    item.done = e.target.checked;
+    render();
+  });
+
+  $('#list').addEventListener('click', e => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn) return;
+    const item = findItem(btn);
+    const list = active();
+    if (btn.dataset.act === 'del') {
+      const idx = list.items.indexOf(item);
+      list.items.splice(idx, 1);
+      toast(`Removed “${item.name}”`, () => list.items.splice(idx, 0, item));
+      render();
+    } else if (btn.dataset.act === 'qty') {
+      const q = prompt(`Quantity for ${item.name}`, item.qty);
+      if (q !== null) { item.qty = q.trim(); render(); }
+    } else if (btn.dataset.act === 'edit') {
+      editItem(item);
+    }
+  });
+
+  $('#list').addEventListener('dblclick', e => {
+    if (e.target.classList.contains('name')) startRename(e.target);
+  });
+
+  function startRename(span) {
+    const item = findItem(span);
+    span.contentEditable = 'true';
+    span.focus();
+    document.getSelection().selectAllChildren(span);
+    const finish = commit => {
+      span.contentEditable = 'false';
+      const v = span.textContent.trim();
+      if (commit && v) item.name = v;
+      render();
+    };
+    span.onkeydown = ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); finish(true); }
+      if (ev.key === 'Escape') finish(false);
+    };
+    span.onblur = () => finish(true);
+  }
+
+  // Full edit dialog (name, qty, category)
+  const editDlg = document.createElement('dialog');
+  editDlg.innerHTML = `
+    <form method="dialog" id="editForm">
+      <h3>Edit item</h3>
+      <div class="row">
+        <input type="text" name="name" required aria-label="Name">
+        <input type="text" name="qty" placeholder="Quantity (e.g. 2, 500g, 1 dozen)" aria-label="Quantity">
+        <select name="cat" style="border:1px solid var(--border);border-radius:10px;padding:8px 12px;background:var(--bg)">${CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="primary" value="save">Save</button>
+      </div>
+    </form>`;
+  document.body.appendChild(editDlg);
+  function editItem(item) {
+    const f = editDlg.querySelector('form');
+    f.name.value = item.name; f.qty.value = item.qty || ''; f.cat.value = item.cat;
+    editDlg.onclose = () => {
+      if (editDlg.returnValue !== 'save') return;
+      item.name = f.name.value.trim() || item.name;
+      item.qty = f.qty.value.trim();
+      item.cat = f.cat.value;
+      const h = state.history[item.name.toLowerCase()];
+      if (h) h.cat = item.cat;
+      render();
+    };
+    editDlg.showModal();
+    f.name.focus();
+  }
+
+  $('#clearDone').onclick = () => {
+    const list = active();
+    const removed = list.items.filter(i => i.done);
+    list.items = list.items.filter(i => !i.done);
+    toast(`Cleared ${removed.length} item${removed.length === 1 ? '' : 's'}`, () => list.items.push(...removed));
+    render();
+  };
+
+  $('#search').addEventListener('input', render);
+
+  // ---------- lists ----------
+  $('#tabs').addEventListener('click', e => {
+    const t = e.target.closest('.tab');
+    if (!t) return;
+    state.activeList = t.dataset.id;
+    $('#search').value = '';
+    render();
+  });
+
+  const menu = $('#menu');
+  function renderListsAdmin() {
+    $('#listsAdmin').innerHTML = state.lists.map(l => `
+      <div data-id="${l.id}">
+        <span>${esc(l.name)} <small style="color:var(--muted)">${l.items.length} items</small></span>
+        <button class="ghost" data-act="rename">Rename</button>
+        ${state.lists.length > 1 ? `<button class="ghost" data-act="remove" style="color:var(--danger)">Delete</button>` : ''}
+      </div>`).join('');
+  }
+  $('#menuBtn').onclick = () => { renderListsAdmin(); menu.showModal(); };
+  $('#closeMenu').onclick = () => menu.close();
+  menu.addEventListener('close', render);
+  $('#listsAdmin').addEventListener('click', e => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const l = state.lists.find(x => x.id === b.closest('[data-id]').dataset.id);
+    if (b.dataset.act === 'rename') {
+      const n = prompt('Rename list', l.name);
+      if (n?.trim()) l.name = n.trim();
+    } else if (confirm(`Delete “${l.name}” and its ${l.items.length} items?`)) {
+      state.lists = state.lists.filter(x => x !== l);
+      if (state.activeList === l.id) state.activeList = state.lists[0].id;
+    }
+    save(); renderListsAdmin();
+  });
+  $('#newListForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const id = uid();
+    state.lists.push({ id, name: $('#newListName').value.trim(), items: [] });
+    state.activeList = id;
+    $('#newListName').value = '';
+    save(); renderListsAdmin();
+  });
+
+  // ---------- backup ----------
+  $('#exportBtn').onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `shopping-list-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  $('#importBtn').onclick = () => $('#importFile').click();
+  $('#importFile').onchange = async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!Array.isArray(data.lists) || !data.lists.length) throw new Error();
+      if (!confirm('Replace your current lists with this backup?')) return;
+      state = { history: {}, ...data };
+      if (!state.lists.some(l => l.id === state.activeList)) state.activeList = state.lists[0].id;
+      save(); renderListsAdmin(); toast('Backup restored');
+    } catch { alert('That file is not a valid backup.'); }
+    e.target.value = '';
+  };
+
+  // ---------- share ----------
+  $('#shareBtn').onclick = async () => {
+    const list = active();
+    const todo = list.items.filter(i => !i.done);
+    if (!todo.length) return toast('Nothing to share');
+    const text = `${list.name}\n` + todo.map(i => `• ${i.name}${i.qty ? ` (${i.qty})` : ''}`).join('\n');
+    try {
+      if (navigator.share) await navigator.share({ title: list.name, text });
+      else { await navigator.clipboard.writeText(text); toast('List copied to clipboard'); }
+    } catch {}
+  };
+
+  render();
+
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
